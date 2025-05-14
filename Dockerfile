@@ -1,6 +1,5 @@
 FROM python:3.10
 
-# Avoid interactive timezone config
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Taipei
 
@@ -11,21 +10,15 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy and install Python dependencies
+COPY requirements.txt /app/requirements.txt
+WORKDIR /app
 RUN pip install --upgrade pip
-RUN pip install \
-    torch torchvision torchaudio \
-    beautifulsoup4 tqdm tiktoken\
-    requests \
-    apscheduler \
-    pytz
-RUN pip install git+https://github.com/openai/whisper.git
-RUN pip install yt-dlp
+RUN pip install -r requirements.txt
 
 # Copy your script files into the container
 COPY . /app
-WORKDIR /app
 
-# Run fetch script by default
+# Default command
 CMD ["python", "fetch_url.py"]
 

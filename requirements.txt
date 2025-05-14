@@ -1,0 +1,14 @@
+torch
+torchvision
+torchaudio
+beautifulsoup4
+tqdm
+tiktoken
+python-dotenv
+requests
+apscheduler
+pytz
+paramiko
+yt-dlp
+git+https://github.com/openai/whisper.git
+
