@@ -8,13 +8,16 @@ import whisper
 import subprocess
 import sys
 import yt_dlp
+import paramiko
+from dotenv import load_dotenv
 
+load_dotenv()
 
 def send_email(receiver_email, video_url, screenshot_paths, subject_name):
     smtp_server = "smtp.gmail.com"
     smtp_port = 587
-    sender_email = ''
-    password = ''
+    sender_email = os.getenv("SENDER_EMAIL")
+    password = os.getenv("EMAIL_PASSWORD")
 
     # Sort screenshots by filename to ensure sequential order
     screenshot_paths = sorted(screenshot_paths, key=lambda x: os.path.basename(x))
@@ -121,14 +124,56 @@ def download_video(url, download_folder):
     os.makedirs(download_folder, exist_ok=True)
     ydl_opts = {
         'outtmpl': f'{download_folder}/%(upload_date)s - %(title)s.%(ext)s',
+        'cookiefile': './youtube.com_cookies.txt',
         'format': 'mp4/bestvideo+bestaudio',
-        'merge_output_format': 'mp4',
+        'merge_output_format': 'mp4'
+        # 'ratelimit': 1_000_000,  # ~1MB/s max download speed
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
         info = ydl.extract_info(url, download=False)
         filename = ydl.prepare_filename(info).replace('.webm', '.mp4').replace('.mkv', '.mp4')
     return filename
+
+
+
+def upload_video_sftp(local_path, remote_path, hostname, username, password):
+    # print(f"📂 Checking local file: {os.path.exists(local_path)} - {local_path}")
+
+    try:
+
+        transport = paramiko.Transport((hostname, os.getenv("SFTP_PORT")))
+        transport.connect(username=username, password=password)
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        sftp.put(local_path, remote_path)
+        print(f"✅ Successfully uploaded {local_path} to {username}@{hostname}:{remote_path}")
+        
+        sftp.close()
+        transport.close()
+
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname, port=2222, username=username, password=password)
+
+        commands = f"""
+        source ~/.bashrc
+        cd /home/bosh/Desktop/project/video/
+        ./generate_png.sh
+        """
+        stdin, stdout, stderr = ssh.exec_command(commands)
+        output = stdout.read().decode()
+        error = stderr.read().decode()
+
+        print(f"🛰️ Remote output:\n{output}")
+        if error.strip():
+            print(f"⚠️ Remote errors:\n{error}")
+
+        ssh.close()
+
+
+    except Exception as e:
+        print(f"❌ Failed to upload via SFTP: {e}")
 
 
 def process_video(video_path, output_root, video_url, receiver_email):
@@ -172,10 +217,21 @@ def process_video(video_path, output_root, video_url, receiver_email):
     print(f"📧 Sending email to {receiver_email}...")
     send_email(receiver_email, video_url, screenshot_paths, f'\n🎧 Transcribed {base_name}')
 
+    print(f"🛰️ Uploading to remote server...")
+    remote_path = f"/home/bosh/Desktop/project/video/videos/{os.path.basename(output_video_path)}"
+    upload_video_sftp(
+        local_path=output_video_path,
+        remote_path=remote_path,
+        hostname=os.getenv("SFTP_HOSTNAME"),
+        username=os.getenv("SFTP_USERNAME"),
+        password=os.getenv("SFTP_PASSWORD")
+    )
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python url.py <video_url> <receiver_email>")
+        print("Usage: python fetch_url.py <video_url> <receiver_email>")
         sys.exit(1)
 
     video_url = sys.argv[1]
@@ -192,3 +248,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     process_video(video_path, output_root=base_output_folder, video_url=video_url, receiver_email=receiver_email)
+
+
